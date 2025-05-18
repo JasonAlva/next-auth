@@ -1,12 +1,14 @@
-import NextAuth from "next-auth";
-import prisma from "../../../libs/prismadb";
+import NextAuth, { NextAuthOptions } from "next-auth";
+import { prisma } from "../../../libs/prismadb";
 import { PrismaAdapter } from "@next-auth/prisma-adapter";
 import CredentialsProvider from "next-auth/providers/credentials";
 import GoogleProvider from "next-auth/providers/google";
 import GitHubProvider from "next-auth/providers/github";
 import { adapter } from "next/dist/server/web/adapter";
+import { use } from "react";
+import bcrypt from "bcrypt";
 
-export const authOptions = {
+export const authOptions: NextAuthOptions = {
   adapter: PrismaAdapter(prisma),
   providers: [
     GoogleProvider({
@@ -25,14 +27,39 @@ export const authOptions = {
         password: { label: "Password", type: "password" },
       },
       async authorize(credentials, req) {
-        const user = { id: "1", name: "J Smith", email: "jsmith@example.com" };
-
-        if (user) {
-          return user;
-        } else {
-          return null;
+        if (!credentials?.email || !credentials?.password) {
+          throw new Error("missing fields");
         }
+
+        const user = await prisma.user.findUnique({
+          where: {
+            email: credentials.email,
+          },
+        });
+
+        if (!user || !user.hashedPassword) {
+          throw new Error("No user found");
+        }
+
+        const passwordMatch = await bcrypt.compare(
+          credentials.password,
+          user.hashedPassword
+        );
+
+        if (!passwordMatch) {
+          throw new Error("invalid password");
+        }
+
+        return user;
       },
     }),
   ],
+  secret: process.env.SECRET,
+  session: {
+    strategy: "jwt",
+  },
+  debug: process.env.NODE_ENV == "development",
 };
+
+const handler = NextAuth(authOptions);
+export { handler as GET, handler as POST };
